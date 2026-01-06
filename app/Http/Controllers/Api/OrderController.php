@@ -72,7 +72,7 @@ class OrderController extends Controller
 
         // Validar que todos los productos existan
         $productIds = array_column($productsData, 'product_id');
-        $products = Product::whereIn('id', $productIds)->get()->keyBy('id');
+        $products = Product::whereIn('id', $productIds)->with('user')->get()->keyBy('id');
 
         foreach ($productIds as $productId) {
             if (!$products->has($productId)) {
@@ -81,6 +81,24 @@ class OrderController extends Controller
                     'errors' => ['products' => ["El producto con ID {$productId} no existe."]],
                 ], 422);
             }
+        }
+
+        // Validar que todos los productos sean del mismo vendedor
+        $vendorIds = $products->pluck('user_id')->unique();
+        if ($vendorIds->count() > 1) {
+            return response()->json([
+                'message' => 'Error de validación',
+                'errors' => ['products' => ['Todos los productos deben ser del mismo vendedor. Por favor, finaliza tu compra actual antes de agregar productos de otro vendedor.']],
+            ], 422);
+        }
+
+        // Validar que el vendedor esté aprobado
+        $vendor = $products->first()->user;
+        if ($vendor->role === 'vendor' && $vendor->status !== 'approved') {
+            return response()->json([
+                'message' => 'Error de validación',
+                'errors' => ['products' => ['Uno o más productos pertenecen a un vendedor que no está aprobado.']],
+            ], 422);
         }
 
         // Intentar obtener el usuario autenticado
@@ -409,8 +427,40 @@ class OrderController extends Controller
             ], 400);
         }
 
+        $oldStatus = $order->status;
         $order->status = $request->status;
         $order->save();
+
+        // Si el pedido se marca como pagado, reducir el stock
+        if ($request->status === 'paid') {
+            // Reducir stock de todos los productos del pedido
+            if ($order->items->isNotEmpty()) {
+                foreach ($order->items as $item) {
+                    $product = $item->product;
+                    if ($product) {
+                        $quantityToReduce = $item->quantity;
+                        $currentStock = $product->stock ?? 0;
+                        $newStock = max(0, $currentStock - $quantityToReduce);
+                        $product->stock = $newStock;
+                        $product->save();
+                    }
+                }
+            } else {
+                // Compatibilidad con el formato legacy (un solo producto)
+                $product = $order->product;
+                if ($product) {
+                    $quantityToReduce = 1; // Por defecto 1 si no hay items
+                    $currentStock = $product->stock ?? 0;
+                    $newStock = max(0, $currentStock - $quantityToReduce);
+                    $product->stock = $newStock;
+                    $product->save();
+                }
+            }
+        }
+
+        // Recargar el pedido con las relaciones actualizadas
+        $order->refresh();
+        $order->load(['customer', 'vendor', 'product', 'items.product']);
 
         return response()->json([
             'message' => 'Estado del pedido actualizado exitosamente',
@@ -441,6 +491,43 @@ class OrderController extends Controller
         return response()->json([
             'data' => [
                 'address' => $lastOrder?->customer_address ?? null,
+            ],
+        ]);
+    }
+
+    /**
+     * Get vendor QR codes for payment method.
+     */
+    public function getVendorQr(Request $request): JsonResponse
+    {
+        $validator = Validator::make($request->all(), [
+            'vendor_id' => 'required|exists:users,id',
+            'payment_method' => 'required|in:yape,plin',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'message' => 'Error de validación',
+                'errors' => $validator->errors(),
+            ], 422);
+        }
+
+        $vendor = User::findOrFail($request->vendor_id);
+
+        if ($vendor->role !== 'vendor' || $vendor->status !== 'approved') {
+            return response()->json([
+                'message' => 'Vendedor no encontrado o no aprobado',
+            ], 404);
+        }
+
+        $qrField = $request->payment_method === 'yape' ? 'yape_qr' : 'plin_qr';
+        $qrPath = $vendor->$qrField;
+
+        return response()->json([
+            'data' => [
+                'vendor_id' => $vendor->id,
+                'payment_method' => $request->payment_method,
+                'qr_url' => $qrPath ? asset('storage/' . $qrPath) : null,
             ],
         ]);
     }

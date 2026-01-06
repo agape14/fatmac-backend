@@ -18,7 +18,17 @@ class ProductController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
-        $query = Product::with(['user', 'categoryModel', 'images']);
+        $query = Product::with(['user', 'categoryModel', 'images'])
+            ->whereHas('user', function ($q) {
+                // Solo mostrar productos de vendedores aprobados (o admins)
+                $q->where(function ($query) {
+                    $query->where('role', 'admin')
+                          ->orWhere(function ($q) {
+                              $q->where('role', 'vendor')
+                                ->where('status', 'approved');
+                          });
+                });
+            });
 
         // Filtrar por categoría (slug)
         if ($request->has('category_slug') && $request->category_slug) {
@@ -38,9 +48,10 @@ class ProductController extends Controller
             $query->where('category', $request->category);
         }
 
-        // Filtrar por ID del vendedor
+        // Filtrar por ID del vendedor (puede ser array o único)
         if ($request->has('vendor_id') && $request->vendor_id) {
-            $query->where('user_id', $request->vendor_id);
+            $vendorIds = is_array($request->vendor_id) ? $request->vendor_id : [$request->vendor_id];
+            $query->whereIn('user_id', $vendorIds);
         }
 
         // Filtrar productos nuevos
@@ -98,7 +109,32 @@ class ProductController extends Controller
      */
     public function store(Request $request): JsonResponse
     {
-        $validator = Validator::make($request->all(), [
+        // Convertir strings 'true'/'false'/'1'/'0' a booleanos
+        $requestData = $request->all();
+        if (isset($requestData['is_new']) && !is_bool($requestData['is_new'])) {
+            $isNewValue = $requestData['is_new'];
+            if (is_string($isNewValue)) {
+                $isNewValue = strtolower(trim($isNewValue));
+                $requestData['is_new'] = in_array($isNewValue, ['true', '1', 'yes', 'on'], true);
+            } elseif (is_numeric($isNewValue)) {
+                $requestData['is_new'] = (bool)(int)$isNewValue;
+            } else {
+                $requestData['is_new'] = filter_var($isNewValue, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE) ?? false;
+            }
+        }
+        if (isset($requestData['is_featured']) && !is_bool($requestData['is_featured'])) {
+            $isFeaturedValue = $requestData['is_featured'];
+            if (is_string($isFeaturedValue)) {
+                $isFeaturedValue = strtolower(trim($isFeaturedValue));
+                $requestData['is_featured'] = in_array($isFeaturedValue, ['true', '1', 'yes', 'on'], true);
+            } elseif (is_numeric($isFeaturedValue)) {
+                $requestData['is_featured'] = (bool)(int)$isFeaturedValue;
+            } else {
+                $requestData['is_featured'] = filter_var($isFeaturedValue, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE) ?? false;
+            }
+        }
+
+        $validator = Validator::make($requestData, [
             'name' => 'required|string|max:255',
             'description' => 'nullable|string',
             'price' => 'required|numeric|min:0',
@@ -112,6 +148,34 @@ class ProductController extends Controller
             'images.*' => 'image|mimes:jpeg,png,jpg,gif,webp|max:5120', // 5MB por imagen
             'is_new' => 'nullable|boolean',
             'is_featured' => 'nullable|boolean',
+        ], [
+            'name.required' => 'El nombre es obligatorio.',
+            'name.string' => 'El nombre debe ser texto.',
+            'name.max' => 'El nombre no debe exceder 255 caracteres.',
+            'description.string' => 'La descripción debe ser texto.',
+            'price.required' => 'El precio es obligatorio.',
+            'price.numeric' => 'El precio debe ser un número.',
+            'price.min' => 'El precio debe ser mayor o igual a 0.',
+            'discount_percentage.numeric' => 'El porcentaje de descuento debe ser un número.',
+            'discount_percentage.min' => 'El porcentaje de descuento debe ser mayor o igual a 0.',
+            'discount_percentage.max' => 'El porcentaje de descuento no puede ser mayor a 100.',
+            'stock.required' => 'El stock es obligatorio.',
+            'stock.integer' => 'El stock debe ser un número entero.',
+            'stock.min' => 'El stock debe ser mayor o igual a 0.',
+            'condition.required' => 'La condición es obligatoria.',
+            'condition.in' => 'La condición debe ser "nuevo" o "usado".',
+            'category_id.exists' => 'La categoría seleccionada no existe.',
+            'category.string' => 'La categoría debe ser texto.',
+            'category.max' => 'La categoría no debe exceder 255 caracteres.',
+            'image_url.url' => 'La URL de la imagen debe ser válida.',
+            'image_url.max' => 'La URL de la imagen no debe exceder 255 caracteres.',
+            'images.array' => 'Las imágenes deben ser un array.',
+            'images.max' => 'No se pueden subir más de 10 imágenes.',
+            'images.*.image' => 'Todos los archivos deben ser imágenes.',
+            'images.*.mimes' => 'Las imágenes deben ser en formato: jpeg, png, jpg, gif o webp.',
+            'images.*.max' => 'Cada imagen no debe ser mayor a 5 MB.',
+            'is_new.boolean' => 'El campo "nuevo" debe ser verdadero o falso.',
+            'is_featured.boolean' => 'El campo "destacado" debe ser verdadero o falso.',
         ]);
 
         if ($validator->fails()) {
@@ -123,17 +187,17 @@ class ProductController extends Controller
 
         $product = Product::create([
             'user_id' => $request->user()->id,
-            'category_id' => $request->category_id,
-            'name' => $request->name,
-            'description' => $request->description,
-            'price' => $request->price,
-            'discount_percentage' => $request->discount_percentage ?? 0,
-            'stock' => $request->stock,
-            'condition' => $request->condition,
-            'category' => $request->category,
-            'image_url' => $request->image_url, // Mantener para compatibilidad
-            'is_new' => $request->is_new ?? false,
-            'is_featured' => $request->is_featured ?? false,
+            'category_id' => $requestData['category_id'] ?? null,
+            'name' => $requestData['name'],
+            'description' => $requestData['description'] ?? null,
+            'price' => $requestData['price'],
+            'discount_percentage' => $requestData['discount_percentage'] ?? 0,
+            'stock' => $requestData['stock'],
+            'condition' => $requestData['condition'],
+            'category' => $requestData['category'] ?? null,
+            'image_url' => $requestData['image_url'] ?? null, // Mantener para compatibilidad
+            'is_new' => $requestData['is_new'] ?? false,
+            'is_featured' => $requestData['is_featured'] ?? false,
         ]);
 
         // Guardar múltiples imágenes si se proporcionaron
@@ -181,7 +245,32 @@ class ProductController extends Controller
             ], 403);
         }
 
-        $validator = Validator::make($request->all(), [
+        // Convertir strings 'true'/'false'/'1'/'0' a booleanos
+        $requestData = $request->all();
+        if (isset($requestData['is_new']) && !is_bool($requestData['is_new'])) {
+            $isNewValue = $requestData['is_new'];
+            if (is_string($isNewValue)) {
+                $isNewValue = strtolower(trim($isNewValue));
+                $requestData['is_new'] = in_array($isNewValue, ['true', '1', 'yes', 'on'], true);
+            } elseif (is_numeric($isNewValue)) {
+                $requestData['is_new'] = (bool)(int)$isNewValue;
+            } else {
+                $requestData['is_new'] = filter_var($isNewValue, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE) ?? false;
+            }
+        }
+        if (isset($requestData['is_featured']) && !is_bool($requestData['is_featured'])) {
+            $isFeaturedValue = $requestData['is_featured'];
+            if (is_string($isFeaturedValue)) {
+                $isFeaturedValue = strtolower(trim($isFeaturedValue));
+                $requestData['is_featured'] = in_array($isFeaturedValue, ['true', '1', 'yes', 'on'], true);
+            } elseif (is_numeric($isFeaturedValue)) {
+                $requestData['is_featured'] = (bool)(int)$isFeaturedValue;
+            } else {
+                $requestData['is_featured'] = filter_var($isFeaturedValue, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE) ?? false;
+            }
+        }
+
+        $validator = Validator::make($requestData, [
             'name' => 'sometimes|required|string|max:255',
             'description' => 'nullable|string',
             'price' => 'sometimes|required|numeric|min:0',
@@ -197,6 +286,36 @@ class ProductController extends Controller
             'delete_images.*' => 'exists:product_images,id',
             'is_new' => 'nullable|boolean',
             'is_featured' => 'nullable|boolean',
+        ], [
+            'name.required' => 'El nombre es obligatorio.',
+            'name.string' => 'El nombre debe ser texto.',
+            'name.max' => 'El nombre no debe exceder 255 caracteres.',
+            'description.string' => 'La descripción debe ser texto.',
+            'price.required' => 'El precio es obligatorio.',
+            'price.numeric' => 'El precio debe ser un número.',
+            'price.min' => 'El precio debe ser mayor o igual a 0.',
+            'discount_percentage.numeric' => 'El porcentaje de descuento debe ser un número.',
+            'discount_percentage.min' => 'El porcentaje de descuento debe ser mayor o igual a 0.',
+            'discount_percentage.max' => 'El porcentaje de descuento no puede ser mayor a 100.',
+            'stock.required' => 'El stock es obligatorio.',
+            'stock.integer' => 'El stock debe ser un número entero.',
+            'stock.min' => 'El stock debe ser mayor o igual a 0.',
+            'condition.required' => 'La condición es obligatoria.',
+            'condition.in' => 'La condición debe ser "nuevo" o "usado".',
+            'category_id.exists' => 'La categoría seleccionada no existe.',
+            'category.string' => 'La categoría debe ser texto.',
+            'category.max' => 'La categoría no debe exceder 255 caracteres.',
+            'image_url.url' => 'La URL de la imagen debe ser válida.',
+            'image_url.max' => 'La URL de la imagen no debe exceder 255 caracteres.',
+            'images.array' => 'Las imágenes deben ser un array.',
+            'images.max' => 'No se pueden subir más de 10 imágenes.',
+            'images.*.image' => 'Todos los archivos deben ser imágenes.',
+            'images.*.mimes' => 'Las imágenes deben ser en formato: jpeg, png, jpg, gif o webp.',
+            'images.*.max' => 'Cada imagen no debe ser mayor a 5 MB.',
+            'delete_images.array' => 'Los IDs de imágenes a eliminar deben ser un array.',
+            'delete_images.*.exists' => 'Uno o más IDs de imágenes no existen.',
+            'is_new.boolean' => 'El campo "nuevo" debe ser verdadero o falso.',
+            'is_featured.boolean' => 'El campo "destacado" debe ser verdadero o falso.',
         ]);
 
         if ($validator->fails()) {
@@ -206,7 +325,7 @@ class ProductController extends Controller
             ], 422);
         }
 
-        $product->update($request->only([
+        $product->update(array_intersect_key($requestData, array_flip([
             'name',
             'description',
             'price',
@@ -218,7 +337,7 @@ class ProductController extends Controller
             'image_url',
             'is_new',
             'is_featured',
-        ]));
+        ])));
 
         // Eliminar imágenes si se solicita
         if ($request->has('delete_images') && is_array($request->delete_images)) {

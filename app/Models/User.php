@@ -25,6 +25,11 @@ class User extends Authenticatable
         'phone_number',
         'status',
         'must_change_password',
+        'whatsapp_number',
+        'yape_qr',
+        'plin_qr',
+        'business_description',
+        'business_address',
     ];
 
     /**

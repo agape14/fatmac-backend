@@ -51,6 +51,7 @@ class ProductResource extends JsonResource
                 'name' => $this->user->name,
                 'email' => $this->user->email,
                 'phone_number' => $this->user->phone_number,
+                'whatsapp_number' => $this->user->whatsapp_number,
             ],
             'created_at' => $this->created_at?->toISOString(),
             'updated_at' => $this->updated_at?->toISOString(),

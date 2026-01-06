@@ -9,6 +9,7 @@ use Illuminate\Support\Facades\Route;
 
 // Rutas de autenticación (públicas)
 Route::post('/register', [AuthController::class, 'register']);
+Route::post('/register-vendor', [AuthController::class, 'registerVendor']);
 Route::post('/login', [AuthController::class, 'login']);
 
 // Rutas de usuario autenticado
@@ -74,7 +75,7 @@ Route::middleware(['auth:sanctum'])->group(function () {
     Route::put('/home-cms/newsletter-text', [\App\Http\Controllers\Api\HomeCmsController::class, 'updateNewsletterText']);
     Route::get('/home-cms/featured-categories', [\App\Http\Controllers\Api\HomeCmsController::class, 'getFeaturedCategories']);
     Route::put('/home-cms/featured-categories/{id}/visibility', [\App\Http\Controllers\Api\HomeCmsController::class, 'updateFeaturedCategoryVisibility']);
-    
+
     // Rutas protegidas del newsletter (solo admin)
     Route::get('/newsletter/subscriptions', [\App\Http\Controllers\Api\NewsletterController::class, 'index']);
 });
@@ -93,6 +94,8 @@ Route::middleware(['auth:sanctum', 'vendor.admin'])->group(function () {
 // Rutas de pedidos
 // Crear pedido (público - no requiere autenticación)
 Route::post('/orders', [OrderController::class, 'store']);
+// Obtener QR del vendedor (público)
+Route::get('/orders/vendor-qr', [OrderController::class, 'getVendorQr']);
 
 // Ver pedidos del vendor (solo vendors y admins autenticados)
 // Ver pedidos del cliente (solo clientes autenticados)
@@ -110,6 +113,35 @@ Route::middleware(['auth:sanctum'])->group(function () {
         Route::get('/', [\App\Http\Controllers\Api\VendorController::class, 'index']);
         Route::get('/pending/count', [\App\Http\Controllers\Api\VendorController::class, 'pendingCount']);
         Route::patch('/{id}/status', [\App\Http\Controllers\Api\VendorController::class, 'updateStatus']);
+        Route::put('/{id}', [\App\Http\Controllers\Api\VendorController::class, 'updateByAdmin']);
     });
+
+    // Gestión de perfil del vendedor (solo vendors)
+    Route::prefix('vendor')->middleware(['auth:sanctum', 'vendor.admin'])->group(function () {
+        Route::put('/profile', [\App\Http\Controllers\Api\VendorController::class, 'updateProfile']);
+        Route::post('/upload-qr', [\App\Http\Controllers\Api\VendorController::class, 'uploadQr']);
+    });
+
+    // Configuraciones (solo admin)
+    Route::prefix('settings')->group(function () {
+        Route::get('/', [\App\Http\Controllers\Api\SettingsController::class, 'index']);
+        Route::put('/{key}', [\App\Http\Controllers\Api\SettingsController::class, 'update']);
+    });
+});
+
+// Configuraciones públicas (solo lectura)
+Route::get('/settings/{key}', [\App\Http\Controllers\Api\SettingsController::class, 'get']);
+
+// Obtener vendedores aprobados (público - para filtros)
+Route::get('/vendors/approved', function () {
+    $vendors = \App\Models\User::where('role', 'vendor')
+        ->where('status', 'approved')
+        ->select('id', 'name', 'email')
+        ->orderBy('name')
+        ->get();
+
+    return response()->json([
+        'data' => $vendors,
+    ]);
 });
 
