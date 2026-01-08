@@ -75,7 +75,7 @@ Route::middleware(['auth:sanctum'])->group(function () {
     Route::put('/home-cms/newsletter-text', [\App\Http\Controllers\Api\HomeCmsController::class, 'updateNewsletterText']);
     Route::get('/home-cms/featured-categories', [\App\Http\Controllers\Api\HomeCmsController::class, 'getFeaturedCategories']);
     Route::put('/home-cms/featured-categories/{id}/visibility', [\App\Http\Controllers\Api\HomeCmsController::class, 'updateFeaturedCategoryVisibility']);
-
+    
     // Rutas protegidas del newsletter (solo admin)
     Route::get('/newsletter/subscriptions', [\App\Http\Controllers\Api\NewsletterController::class, 'index']);
 });

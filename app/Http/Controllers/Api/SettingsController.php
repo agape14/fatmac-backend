@@ -125,13 +125,26 @@ class SettingsController extends Controller
         try {
             // Eliminar el logo anterior si existe
             $oldLogo = Setting::getValue('logo_url');
-            if ($oldLogo && Storage::disk('public')->exists($oldLogo)) {
-                Storage::disk('public')->delete($oldLogo);
+            if ($oldLogo) {
+                // Extraer el path relativo de la URL anterior
+                $oldPath = str_replace(asset('storage/'), '', $oldLogo);
+                $oldPath = str_replace(env('APP_URL') . '/storage/', '', $oldPath);
+                if ($oldPath && Storage::disk('public')->exists($oldPath)) {
+                    Storage::disk('public')->delete($oldPath);
+                }
             }
 
             // Guardar el nuevo logo
             $logoPath = $request->file('logo')->store('logos', 'public');
-            $logoUrl = asset('storage/' . $logoPath);
+            // Usar Storage::url() para generar la URL absoluta correcta
+            $logoUrl = Storage::disk('public')->url($logoPath);
+
+            // Asegurar que la URL sea absoluta (con dominio completo)
+            if (!filter_var($logoUrl, FILTER_VALIDATE_URL)) {
+                // Si no es una URL absoluta, construirla usando APP_URL
+                $appUrl = rtrim(env('APP_URL', 'http://localhost'), '/');
+                $logoUrl = $appUrl . '/storage/' . $logoPath;
+            }
 
             // Guardar la URL en settings
             $setting = Setting::setValue('logo_url', $logoUrl, 'URL del logo del sitio');
