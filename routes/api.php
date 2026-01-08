@@ -126,6 +126,7 @@ Route::middleware(['auth:sanctum'])->group(function () {
     Route::prefix('settings')->group(function () {
         Route::get('/', [\App\Http\Controllers\Api\SettingsController::class, 'index']);
         Route::put('/{key}', [\App\Http\Controllers\Api\SettingsController::class, 'update']);
+        Route::post('/upload-logo', [\App\Http\Controllers\Api\SettingsController::class, 'uploadLogo']);
     });
 });
 
