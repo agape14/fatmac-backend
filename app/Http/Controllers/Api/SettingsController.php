@@ -134,8 +134,39 @@ class SettingsController extends Controller
                 }
             }
 
+            // Asegurar que el directorio logos existe con permisos correctos
+            $logosDir = Storage::disk('public')->path('logos');
+            if (!is_dir($logosDir)) {
+                mkdir($logosDir, 0775, true);
+            }
+            // Asegurar permisos del directorio
+            if (is_dir($logosDir) && is_writable($logosDir)) {
+                @chmod($logosDir, 0775);
+            }
+
             // Guardar el nuevo logo
             $logoPath = $request->file('logo')->store('logos', 'public');
+
+            // Configurar permisos correctos del archivo guardado
+            $fullPath = Storage::disk('public')->path($logoPath);
+            if (file_exists($fullPath)) {
+                // Establecer permisos: 0644 (rw-r--r--) es suficiente para lectura web
+                // Pero 0664 (rw-rw-r--) permite que el grupo también pueda escribir
+                @chmod($fullPath, 0664);
+
+                // Intentar cambiar el propietario si tenemos permisos (solo funciona como root)
+                // En producción, esto normalmente se hace manualmente o con scripts
+                if (function_exists('posix_geteuid') && posix_geteuid() === 0) {
+                    @chown($fullPath, 'www-data');
+                    if (function_exists('posix_getgrnam')) {
+                        $groupInfo = @posix_getgrnam('www-data');
+                        if ($groupInfo) {
+                            @chgrp($fullPath, 'www-data');
+                        }
+                    }
+                }
+            }
+
             // Usar Storage::url() para generar la URL absoluta correcta
             $logoUrl = Storage::disk('public')->url($logoPath);
 
